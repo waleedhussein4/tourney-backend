@@ -51,7 +51,7 @@ app.all("*", (req, res) => {
 
 mongoose
   .connect(
-    "mongodb+srv://jwh:lea123@cluster0.sskwijd.mongodb.net/?retryWrites=true&w=majority&appName=Cluster0"
+    `${process.env.DATABASE_URL}`
   )
   .then(() => {
     app.listen(port, () => {
