@@ -6,6 +6,10 @@ const User = require('../models/userModel');
 const jwt = require('jsonwebtoken');
 const { v4: uuidv4 } = require('uuid');
 const generateAndAddUsersToTournament = require('./tester');
+const Event = require('../models/Event');
+const { getUUIDFromUsername, getUsernameFromUUID } = require('../lib/UserUtils');
+const { getUUIDFromTeamName, getTeamNameFromUUID } = require('../lib/TeamUtils');
+const { getEventsData, getEventData } = require('../lib/EventUtils');
 
 const stripHtml = (html) => {
   const dom = new JSDOM(html);
@@ -924,6 +928,8 @@ const getTournamentDisplayData = async (req, res) => {
       })
     );
 
+    const events = await getEventsData(tournament);
+
     res.status(200).json({
       hasStarted: tournament.hasStarted,
       accessibility: tournament.accessibility,
@@ -948,6 +954,9 @@ const getTournamentDisplayData = async (req, res) => {
       matches: tournament.matches,
       rules: tournament.rules,
       contactInfo: tournament.contactInfo,
+      bracketsShuffled: tournament.bracketsShuffled,
+      bracketOrder: tournament.bracketOrder,
+      events: events,
     });
   } catch (error) {
     console.error(error);
@@ -1648,8 +1657,8 @@ const editEndDate = async (req, res) => {
 
   try {
     const updatedTournament = await Tournament.findByIdAndUpdate(
-      UUID, 
-      { endDate: end }, 
+      UUID,
+      { endDate: end },
       { new: true }
     );
     if (!updatedTournament) {
@@ -1700,27 +1709,6 @@ const getManageTournamentDisplayData = async (req, res) => {
         throw error;
       }
     }
-
-    // Transform the data
-    const transformedData = await Promise.all(tournament.enrolledTeams.map(async (participant) => {
-      const players = await Promise.all(participant.players.map(async (player) => {
-        if (!player || !player.UUID) return null;
-        const user = await getUserByUsername(player.UUID);
-        if (!user) return null;
-        return {
-          username: user.username,
-          score: player.score,
-          eliminated: player.eliminated
-        };
-      }));
-
-      if (players.includes(null)) return null;
-
-      return {
-        teamName: participant.teamName,
-        players: players
-      };
-    })).then(data => data.filter(team => team !== null));
 
     async function getTeamNameAndApplications(applications) {
       try {
@@ -1787,6 +1775,8 @@ const getManageTournamentDisplayData = async (req, res) => {
 
     const transformedEnrolledTeams = await transformEnrolledTeams(tournament.enrolledTeams);
 
+    const events = await getEventsData(tournament);
+
     res.status(200).json({
       hasStarted: tournament.hasStarted,
       accessibility: tournament.accessibility,
@@ -1815,6 +1805,7 @@ const getManageTournamentDisplayData = async (req, res) => {
       contactInfo: tournament.contactInfo,
       bracketsShuffled: tournament.bracketsShuffled,
       bracketOrder: tournament.bracketOrder,
+      events: events,
     });
   } catch (error) {
     console.error(error);
@@ -2614,6 +2605,177 @@ const shuffleBrackets = async (req, res) => {
   }
 };
 
+const createEvent = async (req, res) => {
+  const { UUID, event } = req.body;
+
+  const tournament = await Tournament.findOne({ _id: UUID });
+
+  if (!tournament) {
+    return res.status(404).json({ error: 'Tournament not found' });
+  }
+
+  // check if user is host
+  if (tournament.host != req.user) {
+    return res.status(401).json({ error: 'Unauthorized' });
+  }
+
+  // ensure tournament hasn't ended
+  if (tournament.hasEnded) {
+    return res.status(400).json({ error: 'Tournament has already ended' });
+  }
+
+  // validate title, description, date
+  if (!event.title || !event.start || !event.end) {
+    return res.status(400).json({ error: 'Missing required fields' });
+  }
+
+  // promise all map usernames / team names to uuids
+  let usersUUIDs = undefined;
+  let teamsUUIDs = undefined;
+  if (tournament.teamSize == 1) {
+    usersUUIDs = await Promise.all(event.users.map(async user => {
+      console.log("USERNAME: ", user);
+      const uuid = await getUUIDFromUsername(user);
+      console.log("UUID: ", uuid);
+      if (!uuid) {
+        return res.status(404).json({ error: 'User not found' });
+      }
+      return uuid;
+    }));
+  } else {
+    teamsUUIDs = await Promise.all(event.teams.map(async team => {
+      const uuid = await getUUIDFromTeamName(team);
+      if (!uuid) {
+        return res.status(404).json({ error: 'Team not found' });
+      }
+      return uuid;
+    }));
+  }
+
+  const sanitizedDescription = sanitizeHtml(event.description);
+
+  // add event to tournament
+  let eventModel;
+  try {
+    eventModel = await Event.create({
+      title: event.title,
+      description: sanitizedDescription,
+      start: event.start,
+      end: event.end,
+      users: usersUUIDs,
+      teams: teamsUUIDs,
+    });
+    tournament.events.push(eventModel._id)
+    await tournament.save();
+  } catch (error) {
+    return res.status(500).json({ error: 'An error has occured.' });
+  }
+
+  const eventDisplayData = await getEventData(eventModel);
+
+  res.status(200).json({ event: eventDisplayData });
+};
+
+const deleteEvent = async (req, res) => {
+  const { UUID, eventId } = req.body;
+
+  try {
+    const tournament = await Tournament.findOne({ _id: UUID });
+    if (!tournament) {
+      return res.status(404).json({ error: 'Tournament not found' });
+    }
+
+    if (tournament.host != req.user) {
+      return res.status(401).json({ error: 'Unauthorized' });
+    }
+
+    if (tournament.hasEnded) {
+      return res.status(400).json({ error: 'Tournament has already ended' });
+    }
+
+    const eventIndex = tournament.events.findIndex(event => event === eventId);
+    if (eventIndex === -1) {
+      return res.status(404).json({ error: 'Event not found' });
+    }
+
+    tournament.events.splice(eventIndex, 1);
+    await tournament.save();
+
+    // Ensure that the event is deleted from the Event model
+    const deletedEvent = await Event.deleteOne({ _id: eventId });
+    if (deletedEvent.deletedCount === 0) {
+      return res.status(404).json({ error: 'Event not found in Event model' });
+    }
+
+    return res.status(200).json({ message: 'Event deleted' });
+  } catch (error) {
+    console.error(error);
+    return res.status(500).json({ error: 'Server error' });
+  }
+};
+
+const editEvent = async (req, res) => {
+  const { UUID, eventId, editedEvent } = req.body;
+
+  const tournament = await Tournament.findOne({ _id: UUID });
+  if (!tournament) {
+    return res.status(404).json({ error: 'Tournament not found' });
+  }
+
+  if (tournament.host != req.user) {
+    return res.status(401).json({ error: 'Unauthorized' });
+  }
+
+  if (tournament.hasEnded) {
+    return res.status(400).json({ error: 'Tournament has already ended' });
+  }
+
+  if (!editedEvent.title || !editedEvent.start || !editedEvent.end) {
+    return res.status(400).json({ error: 'Missing required fields' });
+  }
+
+  const eventModel = await Event.findOne({ _id: eventId });
+  if (!eventModel) {
+    return res.status(404).json({ error: 'Event not found' });
+  }
+
+  // promise all map usernames / team names to uuids
+  let usersUUIDs = undefined;
+  let teamsUUIDs = undefined;
+  if (tournament.teamSize == 1) {
+    usersUUIDs = await Promise.all(editedEvent.users.map(async user => {
+      console.log("USERNAME: ", user);
+      const uuid = await getUUIDFromUsername(user);
+      console.log("UUID: ", uuid);
+      if (!uuid) {
+        return res.status(404).json({ error: 'User not found' });
+      }
+      return uuid;
+    }));
+  } else {
+    teamsUUIDs = await Promise.all(editedEvent.teams.map(async team => {
+      const uuid = await getUUIDFromTeamName(team);
+      if (!uuid) {
+        return res.status(404).json({ error: 'Team not found' });
+      }
+      return uuid;
+    }));
+  }
+
+  const sanitizedDescription = sanitizeHtml(editedEvent.description)
+
+  eventModel.title = editedEvent.title;
+  eventModel.description = sanitizedDescription;
+  eventModel.start = editedEvent.start;
+  eventModel.end = editedEvent.end;
+  eventModel.users = usersUUIDs;
+  eventModel.teams = teamsUUIDs;
+  await eventModel.save();
+
+  res.status(200).json({ message: 'Event updated' });
+
+};
+
 module.exports = {
   createTournament,
   getTournamentById,
@@ -2647,5 +2809,8 @@ module.exports = {
   startTournament,
   endTournament,
   depositIntoTournamentBank,
-  shuffleBrackets
+  shuffleBrackets,
+  createEvent,
+  deleteEvent,
+  editEvent,
 };

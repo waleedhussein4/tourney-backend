@@ -1,5 +1,5 @@
 const express = require('express');
-const { createTournament, getTournamentById, getAllTournaments, updateTournament, deleteTournament, getTournamentDisplayData, handleApplicationSubmission, handleJoinAsSolo, handleJoinAsTeam, editTitle, editDescription, editRules, editContactInfo, editStartDate, editEndDate, getManageTournamentDisplayData, getTrendingTournaments, getTournamentCategories, updateScores, acceptApplication, rejectApplication, postUpdate, editSoloParticipants, editTeamParticipants, editMatches, startTournament, endTournament, getMyTournaments, getPaginatedTournaments, getFilteredTournaments, getTournamentCategoriesWithImages, depositIntoTournamentBank, shuffleBrackets } = require('../controller/tourneyController');
+const { createTournament, getTournamentById, getAllTournaments, updateTournament, deleteTournament, getTournamentDisplayData, handleApplicationSubmission, handleJoinAsSolo, handleJoinAsTeam, editTitle, editDescription, editRules, editContactInfo, editStartDate, editEndDate, getManageTournamentDisplayData, getTrendingTournaments, getTournamentCategories, updateScores, acceptApplication, rejectApplication, postUpdate, editSoloParticipants, editTeamParticipants, editMatches, startTournament, endTournament, getMyTournaments, getPaginatedTournaments, getFilteredTournaments, getTournamentCategoriesWithImages, depositIntoTournamentBank, shuffleBrackets, createEvent, deleteEvent, editEvent } = require('../controller/tourneyController');
 const router = express();
 const { auth, getAuth } = require("../middleware/requireAuth")
 
@@ -95,6 +95,15 @@ router.post('/depositIntoTournamentBank', auth, depositIntoTournamentBank)
 
 
 router.post('/shuffleBrackets', auth, shuffleBrackets)
+
+
+router.post('/createEvent' , auth, createEvent)
+
+
+router.post('/deleteEvent', auth, deleteEvent)
+
+
+router.post('/editEvent', auth, editEvent)
 
 
 //delete

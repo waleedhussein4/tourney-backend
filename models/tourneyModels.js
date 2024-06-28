@@ -4,8 +4,8 @@ const Schema = mongoose.Schema;
 const tournamentSchema = new Schema(
   {
     _id: { type: Object },
-    bank: { type: Number, default: 0 },
     UUID: { type: String, required: true, unique: true },
+    bank: { type: Number, default: 0 },
     host: {
       type: Schema.Types.String,
       ref: "User",
@@ -96,7 +96,14 @@ const tournamentSchema = new Schema(
       },
     },
     bracketsShuffled: { type: Boolean, default: false },
-    bracketOrder: { type: [Number], default: [] }
+    bracketOrder: { type: [Number], default: [] },
+    events: [
+      {
+        type: Schema.Types.String,
+        ref: "Event",
+        required: true,
+      }
+    ]
   },
   { timestamps: true }
 );
